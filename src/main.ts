@@ -28,7 +28,7 @@ class ApplicationBootstrap {
     try {
       // Initialize core deterministic engine
       this.engine = new Engine(container);
-      this.engine.start();
+      this.setupBootOverlay();
 
       // Mount automated test harness
       this.harness = new FightHarness(this.engine);
@@ -40,6 +40,30 @@ class ApplicationBootstrap {
     } catch (error: unknown) {
       this.handleFatalError(error);
     }
+  }
+
+  private setupBootOverlay(): void {
+    const overlay = document.getElementById('boot-overlay');
+    if (!overlay || !this.engine) {
+      this.engine?.start();
+      return;
+    }
+
+    let dismissed = false;
+    const dismiss = (): void => {
+      if (dismissed) return;
+      dismissed = true;
+      overlay.classList.add('dismissed');
+      overlay.removeEventListener('click', dismiss);
+      window.removeEventListener('keydown', onKeyDown);
+      this.engine?.start();
+    };
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Enter' || event.key === ' ') dismiss();
+    };
+
+    overlay.addEventListener('click', dismiss);
+    window.addEventListener('keydown', onKeyDown);
   }
 
   private updateStatusBanner(text: string): void {
