@@ -1,30 +1,27 @@
 import * as THREE from 'three';
-import { InputManager } from './InputManager';
+import { InputManager, InputState, neutralInput } from './InputManager';
 import { CombatSystem } from '../combat/CombatSystem';
-import { PhysicsSystem } from '../combat/PhysicsSystem';
 import { AISystem } from '../combat/AISystem';
+import { PhysicsBody, stepPhysics } from '../combat/PhysicsSystem';
 import { GameStateMachine } from './GameStateMachine';
 import { ReplaySystem } from './ReplaySystem';
-import { HudOverlay } from '../ui/HudOverlay';
+import { CameraController } from './CameraController';
+import { HudOverlay, LobbySelection } from '../ui/HudOverlay';
+import { ARENA_REGISTRY } from '../arenas/ArenaRegistry';
 import { FIGHTER_REGISTRY } from '../fighters/FighterRegistry';
-import { buildJantarMantarArena } from '../arenas/JantarMantarArena';
+import { ProceduralAnimator } from '../fighters/ProceduralAnimator';
+import { QUICK, POWER_MOVE, SPECIAL_MOVE, ULTIMATE_MOVE, MoveDefinition } from '../combat/MoveTypes';
 
 export interface FighterSimState {
-  x: number;
-  z: number;
-  health: number;
-  aura: number;
-  state: 'IDLE' | 'WALK' | 'ATTACK' | 'HITSTUN';
+  x: number; z: number; health: number; aura: number;
+  state: 'IDLE' | 'WALK' | 'ATTACK' | 'BLOCK' | 'HITSTUN' | 'JUMP' | 'CROUCH' | 'KO';
+}
+export interface EngineSnapshot {
+  frame: number; fps: number; phase: string; p1: FighterSimState; p2: FighterSimState; errors: string[];
 }
 
-export interface EngineSnapshot {
-  frame: number;
-  fps: number;
-  phase: string;
-  p1: FighterSimState;
-  p2: FighterSimState;
-  errors: string[];
-}
+const TICK_MS = 1000 / 60;
+const TICKERS = ['Parliamentary power level: surprisingly combustible', 'Exclusive: both sides deny button mashing', 'Breaking: local aura economy reaches new high', 'Analysts predict a rematch before the ad break'];
 
 export class Engine {
   private readonly scene = new THREE.Scene();
@@ -32,159 +29,172 @@ export class Engine {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly inputManager = new InputManager();
   private readonly combatSystem = new CombatSystem();
-  private readonly physicsSystem = new PhysicsSystem();
   private readonly aiSystem = new AISystem();
   private readonly stateMachine = new GameStateMachine();
   private readonly replaySystem = new ReplaySystem();
+  private readonly cameraController: CameraController;
   private readonly hud: HudOverlay;
-
-  private p1Mesh: THREE.Group;
-  private p2Mesh: THREE.Group;
-  
-  public p1State: FighterSimState = { x: -2, z: 0, health: 100, aura: 0, state: 'IDLE' };
-  public p2State: FighterSimState = { x: 2, z: 0, health: 100, aura: 0, state: 'IDLE' };
-
+  private p1Mesh: THREE.Group = new THREE.Group();
+  private p2Mesh: THREE.Group = new THREE.Group();
+  private p1Animator = new ProceduralAnimator(this.p1Mesh);
+  private p2Animator = new ProceduralAnimator(this.p2Mesh);
+  private p1Body!: PhysicsBody;
+  private p2Body!: PhysicsBody;
+  private selection: LobbySelection = { p1: 'modi', p2: 'rahul', arena: 'jantar', difficulty: 'normal' };
   private frame = 0;
   private fps = 60;
   private isRunning = false;
-  private hitStopFrames = 0;
-  private cameraShakeIntensity = 0;
-  private readonly errors: string[] = [];
   private lastTime = performance.now();
   private accumulator = 0;
-  private readonly fixedDelta = 1000 / 60;
+  private hitStopFrames = 0;
+  private cameraShake = 0;
+  private round = 1;
+  private timer = 60;
+  private p1Rounds = 0;
+  private p2Rounds = 0;
+  private readonly errors: string[] = [];
 
   constructor(container: HTMLElement) {
-    this.camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
-    this.camera.position.set(0, 3.5, 9);
-    this.camera.lookAt(0, 1, 0);
-
+    const width = Math.max(container.clientWidth, 1);
+    const height = Math.max(container.clientHeight, 1);
+    this.camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
+    this.cameraController = new CameraController(this.camera);
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setSize(container.clientWidth, container.clientHeight);
+    this.renderer.setSize(width, height);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     container.appendChild(this.renderer.domElement);
-
-    buildJantarMantarArena(this.scene);
-
-    // Instantiate Roster Meshes
-    this.p1Mesh = FIGHTER_REGISTRY['modi']?.createRig() || new THREE.Group();
-    this.p2Mesh = FIGHTER_REGISTRY['rahul']?.createRig() || new THREE.Group();
-    this.scene.add(this.p1Mesh);
-    this.scene.add(this.p2Mesh);
-
-    this.hud = new HudOverlay(container);
+    this.p1Body = this.body(-2);
+    this.p2Body = this.body(2);
+    this.hud = new HudOverlay(container, (selection) => this.startMatch(selection));
+    window.addEventListener('resize', this.resize);
+    this.stateMachine.subscribe((phase) => {
+      if (phase === 'CHAR_SELECT') this.hud.showLobby();
+      if (phase === 'MATCH') this.hud.showMatch();
+    });
   }
 
-  public start(): void {
+  start(): void {
     if (this.isRunning) return;
     this.isRunning = true;
     this.lastTime = performance.now();
     requestAnimationFrame(this.loop);
   }
-
-  public stop(): void {
-    this.isRunning = false;
+  stop(): void { this.isRunning = false; }
+  dismissTitle(): void {
+    if (this.stateMachine.is('TITLE') || this.stateMachine.is('MATCH_OVER')) this.stateMachine.transition('CHAR_SELECT');
   }
+  startMatch(selection: LobbySelection = this.selection): void {
+    this.selection = selection;
+    if (this.stateMachine.is('TITLE')) this.stateMachine.transition('CHAR_SELECT');
+    if (this.stateMachine.is('MATCH_OVER')) this.stateMachine.transition('CHAR_SELECT');
+    if (this.stateMachine.is('CHAR_SELECT')) this.stateMachine.transition('VS_INTRO');
+    if (this.stateMachine.is('VS_INTRO') || this.stateMachine.is('ROUND_OVER')) this.stateMachine.transition('MATCH');
+    this.clearScene();
+    ARENA_REGISTRY[this.selection.arena].build(this.scene);
+    this.p1Mesh = FIGHTER_REGISTRY[this.selection.p1].createRig();
+    this.p2Mesh = FIGHTER_REGISTRY[this.selection.p2].createRig();
+    this.p1Animator = new ProceduralAnimator(this.p1Mesh);
+    this.p2Animator = new ProceduralAnimator(this.p2Mesh);
+    this.scene.add(this.p1Mesh, this.p2Mesh);
+    this.p1Body = this.body(-2);
+    this.p2Body = this.body(2);
+    this.combatSystem.reset();
+    this.round = 1; this.timer = 60; this.p1Rounds = 0; this.p2Rounds = 0; this.frame = 0;
+    this.hud.showMatch();
+  }
+  private readonly body = (x: number): PhysicsBody => ({ position: { x, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, grounded: true, hitstun: 0 });
 
   private readonly loop = (time: number): void => {
     if (!this.isRunning) return;
-
-    const delta = time - this.lastTime;
-    this.lastTime = time;
-    this.accumulator += Math.min(delta, 100);
-    this.fps = Math.round(1000 / Math.max(delta, 1));
-
-    while (this.accumulator >= this.fixedDelta) {
-      if (this.hitStopFrames > 0) {
-        this.hitStopFrames--;
-      } else {
-        this.fixedTick();
-      }
-      this.accumulator -= this.fixedDelta;
-    }
-
-    this.renderFrame();
-    requestAnimationFrame(this.loop);
+    const delta = Math.min(time - this.lastTime, 100);
+    this.lastTime = time; this.accumulator += delta; this.fps = Math.round(1000 / Math.max(delta, 1));
+    while (this.accumulator >= TICK_MS) { this.fixedTick(); this.accumulator -= TICK_MS; }
+    this.renderFrame(); requestAnimationFrame(this.loop);
   };
 
   private fixedTick(): void {
     this.frame++;
-
-    // 1. Poll Input & Apply Direct Arcade Velocity
-    const p1Input = this.inputManager.getState();
-    const speed = 0.14;
-
-    if (p1Input.left) this.p1State.x -= speed;
-    if (p1Input.right) this.p1State.x += speed;
-    if (p1Input.up) this.p1State.z -= speed * 0.6;
-    if (p1Input.down) this.p1State.z += speed * 0.6;
-
-    // Attack Trigger & Hit Juice Trigger (Test Punch)
-    if (p1Input.quick && Math.abs(this.p1State.x - this.p2State.x) < 2.5) {
-      this.p2State.health = Math.max(0, this.p2State.health - 5);
-      this.hitStopFrames = 8; // Freeze frame impact juice
-      this.cameraShakeIntensity = 0.4; // Screen shake
-    }
-
-    // Arena boundary clamp
-    this.p1State.x = Math.max(-6.5, Math.min(6.5, this.p1State.x));
-    this.p1State.z = Math.max(-2.5, Math.min(2.5, this.p1State.z));
-
-    // Sync 3D Meshes
-    if (this.p1Mesh) {
-      this.p1Mesh.position.set(this.p1State.x, 0, this.p1State.z);
-      this.p1Mesh.lookAt(this.p2State.x, 0, this.p2State.z);
-    }
-    if (this.p2Mesh) {
-      this.p2Mesh.position.set(this.p2State.x, 0, this.p2State.z);
-      this.p2Mesh.lookAt(this.p1State.x, 0, this.p1State.z);
-    }
-
-    this.replaySystem.record({
-      tick: this.frame,
-      fighters: [{ x: this.p1State.x, health: this.p1State.health }, { x: this.p2State.x, health: this.p2State.health }]
-    });
-
-    this.hud.update({
-      round: 1,
-      time: Math.max(0, 99 - Math.floor(this.frame / 60)),
-      p1Hp: this.p1State.health,
-      p2Hp: this.p2State.health
-    });
+    if (!this.stateMachine.is('MATCH')) return;
+    if (this.hitStopFrames > 0) { this.hitStopFrames--; return; }
+    const p1Input = this.inputManager.sample();
+    const p2Input = this.selection.difficulty === 'local'
+      ? neutralInput()
+      : this.aiSystem.update(Math.abs(this.p1Body.position.x - this.p2Body.position.x), this.combatSystem.p2State.stun === 0, this.selection.difficulty, this.frame);
+    this.combatSystem.p1State.blocking = p1Input.left && this.p1Body.position.x > this.p2Body.position.x;
+    this.combatSystem.p2State.blocking = p2Input.right && this.p2Body.position.x < this.p1Body.position.x;
+    this.move(this.p1Body, p1Input);
+    this.move(this.p2Body, p2Input);
+    stepPhysics(this.p1Body); stepPhysics(this.p2Body);
+    this.resolveAttack(this.p1Body, this.p2Body, p1Input, this.combatSystem.p1State, this.combatSystem.p2State);
+    this.resolveAttack(this.p2Body, this.p1Body, p2Input, this.combatSystem.p2State, this.combatSystem.p1State);
+    this.combatSystem.tick();
+    this.syncMeshes();
+    this.timer = Math.max(0, 60 - Math.floor(this.frame / 60));
+    if (this.timer === 0 || this.combatSystem.p1State.health <= 0 || this.combatSystem.p2State.health <= 0) this.endRound();
+    this.replaySystem.record({ tick: this.frame, fighters: [
+      { position: new THREE.Vector3(this.p1Body.position.x, this.p1Body.position.y, this.p1Body.position.z), input: p1Input, health: this.combatSystem.p1State.health },
+      { position: new THREE.Vector3(this.p2Body.position.x, this.p2Body.position.y, this.p2Body.position.z), input: p2Input, health: this.combatSystem.p2State.health },
+    ]});
+    this.hud.update({ round: this.round, timer: this.timer, ticker: TICKERS[Math.floor(this.frame / 240) % TICKERS.length], phase: 'MATCH',
+      p1: { name: FIGHTER_REGISTRY[this.selection.p1].name, health: this.combatSystem.p1State.health, aura: this.combatSystem.p1State.aura, roundsWon: this.p1Rounds, combo: 0 },
+      p2: { name: FIGHTER_REGISTRY[this.selection.p2].name, health: this.combatSystem.p2State.health, aura: this.combatSystem.p2State.aura, roundsWon: this.p2Rounds, combo: 0 } });
   }
 
-  private renderFrame(): void {
-    // Dynamic Camera Shake Decay
-    if (this.cameraShakeIntensity > 0) {
-      this.camera.position.x = (Math.random() - 0.5) * this.cameraShakeIntensity;
-      this.camera.position.y = 3.5 + (Math.random() - 0.5) * this.cameraShakeIntensity;
-      this.cameraShakeIntensity *= 0.85;
+  private move(body: PhysicsBody, input: InputState): void {
+    const speed = 0.075;
+    body.velocity.x += (input.right ? speed : 0) - (input.left ? speed : 0);
+    body.velocity.z += (input.down ? speed : 0) - (input.up ? speed : 0);
+    if (input.up && body.grounded) { body.velocity.y = 0.18; body.grounded = false; }
+    body.position.x = Math.max(-6.5, Math.min(6.5, body.position.x));
+    body.position.z = Math.max(-2.5, Math.min(2.5, body.position.z));
+  }
+  private resolveAttack(attackerBody: PhysicsBody, defenderBody: PhysicsBody, input: InputState, attacker: typeof this.combatSystem.p1State, defender: typeof this.combatSystem.p2State): void {
+    const move = this.getMove(input);
+    if (!move || Math.abs(attackerBody.position.x - defenderBody.position.x) > move.range) return;
+    const result = this.combatSystem.executeMove(attacker, defender, move);
+    if (result.hit) { this.hitStopFrames = move.hitStopFrames; this.cameraShake = result.damage * 0.02; defenderBody.velocity.x += attackerBody.position.x < defenderBody.position.x ? move.knockback : -move.knockback; }
+  }
+  private getMove(input: InputState): MoveDefinition | null {
+    if (input.ultimate) return ULTIMATE_MOVE;
+    if (input.special) return SPECIAL_MOVE;
+    if (input.power) return POWER_MOVE;
+    if (input.quick) return QUICK;
+    return null;
+  }
+  private endRound(): void {
+    const p1Won = this.combatSystem.p2State.health <= this.combatSystem.p1State.health;
+    if (p1Won) this.p1Rounds++; else this.p2Rounds++;
+    if (this.p1Rounds >= 2 || this.p2Rounds >= 2) {
+      this.stateMachine.transition('MATCH_OVER');
+      this.hud.showPostMatch(this.p1Rounds > this.p2Rounds ? 'PLAYER 1' : 'CPU', () => this.startMatch(this.selection), () => this.dismissTitle());
     } else {
-      this.camera.position.set(0, 3.5, 9);
-    }
-
-    this.renderer.render(this.scene, this.camera);
-  }
-
-  public getSnapshot(): EngineSnapshot {
-    return {
-      frame: this.frame,
-      fps: this.fps,
-      phase: this.stateMachine.phase,
-      p1: { ...this.p1State },
-      p2: { ...this.p2State },
-      errors: [...this.errors]
-    };
-  }
-
-  public stepFrames(frames: number, p1Input?: any, p2Input?: any): void {
-    for (let i = 0; i < frames; i++) {
-      this.fixedTick();
+      this.stateMachine.transition('ROUND_OVER');
+      this.round++; this.timer = 60; this.combatSystem.reset(); this.p1Body = this.body(-2); this.p2Body = this.body(2);
+      this.stateMachine.transition('MATCH');
     }
   }
-
-  public getReplayFrames(): any[] {
-    return this.replaySystem.getFrames();
+  private syncMeshes(): void {
+    this.p1Mesh.position.set(this.p1Body.position.x, this.p1Body.position.y, this.p1Body.position.z);
+    this.p2Mesh.position.set(this.p2Body.position.x, this.p2Body.position.y, this.p2Body.position.z);
+    this.p1Mesh.lookAt(this.p2Mesh.position.x, 0.9, this.p2Mesh.position.z);
+    this.p2Mesh.lookAt(this.p1Mesh.position.x, 0.9, this.p1Mesh.position.z);
+    this.p1Animator.update(this.frame, this.stateFor(this.combatSystem.p1State, this.p1Body), this.frame);
+    this.p2Animator.update(this.frame, this.stateFor(this.combatSystem.p2State, this.p2Body), this.frame);
+    this.cameraController.update(this.p1Mesh.position, this.p2Mesh.position);
   }
+  private stateFor(combat: typeof this.combatSystem.p1State, body: PhysicsBody): FighterSimState['state'] {
+    if (combat.health <= 0) return 'KO'; if (combat.stun > 0) return 'HITSTUN'; if (!body.grounded) return 'JUMP'; return 'IDLE';
+  }
+  private clearScene(): void { while (this.scene.children.length) this.scene.remove(this.scene.children[0]); }
+  private readonly resize = (): void => { const canvas = this.renderer.domElement; this.renderer.setSize(canvas.parentElement?.clientWidth ?? window.innerWidth, canvas.parentElement?.clientHeight ?? window.innerHeight); this.cameraController.resize(canvas.clientWidth, canvas.clientHeight); };
+  private renderFrame(): void { if (this.cameraShake > 0) { this.camera.position.x += (Math.random() - 0.5) * this.cameraShake; this.cameraShake *= 0.84; } this.renderer.render(this.scene, this.camera); }
+  getSnapshot(): EngineSnapshot { return { frame: this.frame, fps: this.fps, phase: this.stateMachine.phase, p1: { x: this.p1Body.position.x, z: this.p1Body.position.z, health: this.combatSystem.p1State.health, aura: this.combatSystem.p1State.aura, state: this.stateFor(this.combatSystem.p1State, this.p1Body) }, p2: { x: this.p2Body.position.x, z: this.p2Body.position.z, health: this.combatSystem.p2State.health, aura: this.combatSystem.p2State.aura, state: this.stateFor(this.combatSystem.p2State, this.p2Body) }, errors: [...this.errors] }; }
+  stepFrames(frames: number, p1Input: Partial<InputState> = {}, p2Input: Partial<InputState> = {}): void {
+    const p1 = { ...neutralInput(), ...p1Input }; const originalDifficulty = this.selection.difficulty;
+    this.inputManager.inject(p1); if (Object.keys(p2Input).length) this.selection.difficulty = 'local';
+    for (let i = 0; i < frames; i++) this.fixedTick();
+    this.inputManager.inject(null); this.selection.difficulty = originalDifficulty;
+  }
+  getReplayFrames() { return this.replaySystem.getFrames(); }
 }

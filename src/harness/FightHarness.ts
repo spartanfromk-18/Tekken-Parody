@@ -89,6 +89,27 @@ export class FightHarness {
     const passed = results.every((r) => r.passed);
     return { passed, results };
   }
+
+  async runFullAudit(): Promise<HarnessAuditResult> {
+    this.engine.startMatch({ p1: 'modi', p2: 'rahul', arena: 'sansad', difficulty: 'normal' });
+    const results: HarnessAuditResult['results'] = [];
+    const initial = this.getState();
+    this.stepFrames(20, { right: true });
+    const moved = this.getState();
+    results.push({ test: 'Lobby selection starts requested match', passed: moved.phase === 'MATCH', detail: `${moved.phase} on sansad with modi vs rahul.` });
+    results.push({ test: 'P1 movement', passed: moved.p1.x > initial.p1.x, detail: `${initial.p1.x.toFixed(2)} -> ${moved.p1.x.toFixed(2)}` });
+    const hp = moved.p2.health;
+    this.stepFrames(1, { quick: true });
+    this.stepFrames(12);
+    const hit = this.getState();
+    results.push({ test: 'Quick attack damages P2', passed: hit.p2.health < hp, detail: `P2 HP ${hp} -> ${hit.p2.health}.` });
+    results.push({ test: 'Aura builds from combat', passed: hit.p1.aura > initial.p1.aura, detail: `P1 aura is ${hit.p1.aura}.` });
+    const aiStart = hit.p2.x;
+    this.stepFrames(45);
+    const aiEnd = this.getState();
+    results.push({ test: 'CPU AI advances P2', passed: Math.abs(aiEnd.p2.x - aiStart) > 0.02, detail: `${aiStart.toFixed(2)} -> ${aiEnd.p2.x.toFixed(2)}.` });
+    return { passed: results.every((result) => result.passed), results };
+  }
 }
 
 declare global {

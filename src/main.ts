@@ -4,59 +4,37 @@ import { FightHarness } from './harness/FightHarness';
 class ApplicationBootstrap {
   private static instance: ApplicationBootstrap | null = null;
   private engine: Engine | null = null;
-  private harness: FightHarness | null = null;
 
-  public static getInstance(): ApplicationBootstrap {
-    if (!ApplicationBootstrap.instance) {
-      ApplicationBootstrap.instance = new ApplicationBootstrap();
-    }
-    return ApplicationBootstrap.instance;
+  static getInstance(): ApplicationBootstrap {
+    return this.instance ??= new ApplicationBootstrap();
   }
 
-  public init(): void {
+  init(): void {
     const container = document.getElementById('app');
-    if (!container) {
-      throw new Error('[AURA CLASH FATAL] Root element `#app` not located in the DOM.');
-    }
-
+    if (!container) throw new Error('[AURA CLASH] Root element #app not found.');
     try {
       this.engine = new Engine(container);
-      this.harness = new FightHarness(this.engine);
-      window.__FIGHT_HARNESS__ = this.harness;
-
-      this.setupSplashDismissal();
-      this.updateStatusBanner('HARNESS: READY (Tekken Edition)');
-      
-      console.log('%c[AURA CLASH] Tekken 8 Arcade Engine Initialized', 'color: #00ffff; font-weight: bold; background: #080a14; padding: 6px 12px; border-radius: 4px;');
+      window.__FIGHT_HARNESS__ = new FightHarness(this.engine);
+      const dismiss = (event: Event): void => {
+        const target = event.target as HTMLElement;
+        const keyboardStart = event instanceof KeyboardEvent && (event.key === 'Enter' || event.key === ' ');
+        if (!keyboardStart && !target.closest('#boot-overlay')) return;
+        event.preventDefault();
+        document.getElementById('boot-overlay')?.classList.add('dismissed');
+        this.engine?.dismissTitle();
+        window.removeEventListener('keydown', dismiss);
+        window.removeEventListener('click', dismiss);
+      };
+      window.addEventListener('keydown', dismiss);
+      window.addEventListener('click', dismiss);
+      this.engine.start();
+      const status = document.getElementById('harness-status');
+      if (status) status.textContent = 'HARNESS: READY';
     } catch (error: unknown) {
-      console.error('[CRITICAL INIT ERROR]', error);
+      console.error('[CRITICAL BOOTSTRAP ERROR]', error);
     }
   }
-
-  private setupSplashDismissal(): void {
-    const splash = document.querySelector('.title-overlay') as HTMLElement || document.getElementById('splash') || document.body;
-    
-    const dismiss = () => {
-      this.engine?.start();
-      if (splash && splash !== document.body) {
-        splash.style.transition = 'opacity 0.5s ease';
-        splash.style.opacity = '0';
-        setTimeout(() => splash.remove(), 500);
-      }
-    };
-
-    window.addEventListener('keydown', dismiss, { once: true });
-    window.addEventListener('click', dismiss, { once: true });
-  }
-
-  private updateStatusBanner(text: string): void {
-    const statusEl = document.getElementById('harness-status');
-    if (statusEl) statusEl.textContent = text;
-  }
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => ApplicationBootstrap.getInstance().init());
-} else {
-  ApplicationBootstrap.getInstance().init();
-}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => ApplicationBootstrap.getInstance().init());
+else ApplicationBootstrap.getInstance().init();
