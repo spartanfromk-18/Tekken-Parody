@@ -39,8 +39,8 @@ export class MasterySystem {
   save(record: MasteryRecord, storage: Storage | null = typeof window === 'undefined' ? null : window.localStorage): void {
     try {
       storage?.setItem(this.storageKey, JSON.stringify(record));
-    } catch {
-      // Persistence is optional; gameplay state remains usable without storage.
+    } catch (error: unknown) {
+      console.warn('[MasterySystem] Progress could not be saved', error);
     }
   }
 }

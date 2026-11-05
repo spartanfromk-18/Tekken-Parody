@@ -21,8 +21,9 @@ export class WebsocketClient {
       this.socket.onopen = () => { this.status = 'connected'; };
       this.socket.onclose = () => { this.status = 'closed'; };
       this.socket.onerror = () => { this.status = 'error'; };
-    } catch {
+    } catch (error: unknown) {
       this.status = 'error';
+      console.error('[WebsocketClient] Unable to connect', error);
     }
   }
 

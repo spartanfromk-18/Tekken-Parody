@@ -25,4 +25,11 @@ export function stepPhysics(body: PhysicsBody): void {
 
   body.velocity.x *= 0.96;
   body.velocity.z *= 0.96;
+  body.hitstun = Math.max(0, body.hitstun - 1);
+}
+
+export function applyKnockback(body: PhysicsBody, x: number, z = 0): void {
+  body.velocity.x += x;
+  body.velocity.z += z;
+  body.grounded = false;
 }

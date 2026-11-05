@@ -20,6 +20,9 @@ export class HudOverlay {
     this.element = document.createElement('div');
     this.element.className = 'hud-overlay';
     this.root.appendChild(this.element);
+    this.element.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);'
+      + 'padding:10px 18px;background:#0f1322dd;border:1px solid #283252;'
+      + 'color:#fff;font:600 14px monospace;z-index:5;';
   }
 
   update(state: HudState): void {

@@ -16,6 +16,7 @@ export interface MoveDefinition {
   range: number;
   hitStopFrames: number;
   auraGain: number;
+  auraCost: number;
   knockback: number;
   launchVelocity?: number;
 }
@@ -30,6 +31,7 @@ export const QUICK: MoveDefinition = {
   range: 1.05,
   hitStopFrames: 3,
   auraGain: 8,
+  auraCost: 5,
   knockback: 0.035,
 };
 
@@ -44,6 +46,7 @@ export const POWER_MOVE: MoveDefinition = {
   knockback: 0.16,
   hitStopFrames: 7,
   auraGain: 12,
+  auraCost: 10,
 };
 
 export const LAUNCHER_MOVE: MoveDefinition = {

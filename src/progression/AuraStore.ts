@@ -45,8 +45,8 @@ export class AuraStore {
   private save(): void {
     try {
       this.storage?.setItem(STORAGE_KEY, JSON.stringify(this.data));
-    } catch {
-      // Storage can be unavailable in private browsing or restricted environments.
+    } catch (error: unknown) {
+      console.warn('[AuraStore] Progress could not be saved', error);
     }
   }
 
@@ -57,8 +57,8 @@ export class AuraStore {
       const parsed: unknown = JSON.parse(raw);
       if (!isAuraSaveData(parsed)) return;
       this.data = { version: 1, aura: parsed.aura, unlocks: [...new Set(parsed.unlocks)] };
-    } catch {
-      // Corrupt or unavailable storage falls back to the in-memory defaults.
+    } catch (error: unknown) {
+      console.warn('[AuraStore] Progress could not be loaded', error);
     }
   }
 }

@@ -7,5 +7,12 @@ export default defineConfig({
   build: {
     target: "ES2022",
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          three: ["three"],
+        },
+      },
+    },
   },
 });
