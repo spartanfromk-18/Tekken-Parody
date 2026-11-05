@@ -94,11 +94,11 @@ export class Engine {
     this.frameCount++; this.timer = Math.max(0, this.timer - 1 / 60);
     this.startAttack(1, p1, c1); this.startAttack(2, p2, c2);
     this.advanceAttack(1, c1, c2); this.advanceAttack(2, c2, c1);
+    if (p1.left || p1.right) this.physics.p1.velocity.x = (p1.right ? 0.08 : 0) - (p1.left ? 0.08 : 0); if (p1.up || p1.down) this.physics.p1.velocity.z = (p1.down ? 0.08 : 0) - (p1.up ? 0.08 : 0);
+    if (p2.left || p2.right) this.physics.p2.velocity.x = (p2.right ? 0.08 : 0) - (p2.left ? 0.08 : 0); if (p2.up || p2.down) this.physics.p2.velocity.z = (p2.down ? 0.08 : 0) - (p2.up ? 0.08 : 0);
     stepPhysics(this.physics.p1); stepPhysics(this.physics.p2);
-    this.physics.p1.position.x = THREE.MathUtils.clamp(this.physics.p1.position.x, -7, 7);
-    this.physics.p2.position.x = THREE.MathUtils.clamp(this.physics.p2.position.x, -7, 7);
-    this.physics.p1.position.z = THREE.MathUtils.clamp(this.physics.p1.position.z, -3, 3);
-    this.physics.p2.position.z = THREE.MathUtils.clamp(this.physics.p2.position.z, -3, 3);
+    this.physics.p1.position.x = THREE.MathUtils.clamp(this.physics.p1.position.x, -7, 7); this.physics.p2.position.x = THREE.MathUtils.clamp(this.physics.p2.position.x, -7, 7);
+    this.physics.p1.position.z = THREE.MathUtils.clamp(this.physics.p1.position.z, -3, 3); this.physics.p2.position.z = THREE.MathUtils.clamp(this.physics.p2.position.z, -3, 3);
     this.recordReplay(p1, p2); this.updatePresentation(); this.checkMatchEnd();
   }
   private startAttack(player: 1 | 2, input: InputState, combat: CombatState): void {

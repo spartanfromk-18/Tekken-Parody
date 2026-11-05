@@ -46,10 +46,29 @@ const KEY_BINDINGS: Readonly<Record<string, keyof InputState>> = {
   KeyL: "ultimate",
   Space: "ultimate",
   Escape: "pause",
+  a: "left",
+  d: "right",
+  w: "up",
+  s: "down",
+  arrowleft: "left",
+  arrowright: "right",
+  arrowup: "up",
+  arrowdown: "down",
+  q: "sidestepUp",
+  e: "sidestepDown",
+  j: "quick",
+  k: "power",
+  i: "launcher",
+  u: "special",
+  l: "ultimate",
+  " ": "ultimate",
+  spacebar: "ultimate",
+  enter: "pause",
+  escape: "pause",
 };
 
 export class InputManager {
-  private readonly held = new Set<string>();
+  private readonly held = new Set<keyof InputState>();
   private synthetic: InputState | null = null;
 
   constructor(private readonly target: Window = window) {
@@ -61,9 +80,7 @@ export class InputManager {
   sample(): InputState {
     if (this.synthetic) return { ...this.synthetic };
     const state = neutralInput();
-    for (const [code, action] of Object.entries(KEY_BINDINGS) as Array<[string, keyof InputState]>) {
-      state[action] = this.held.has(code);
-    }
+    for (const action of this.held) state[action] = true;
     return state;
   }
 
@@ -83,16 +100,22 @@ export class InputManager {
   }
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
-    if (KEY_BINDINGS[event.code]) {
+    const action = this.actionFor(event);
+    if (action) {
       event.preventDefault();
-      this.held.add(event.code);
+      this.held.add(action);
     }
   };
 
   private readonly onKeyUp = (event: KeyboardEvent): void => {
-    if (KEY_BINDINGS[event.code]) {
+    const action = this.actionFor(event);
+    if (action) {
       event.preventDefault();
-      this.held.delete(event.code);
+      this.held.delete(action);
     }
   };
+
+  private actionFor(event: KeyboardEvent): keyof InputState | undefined {
+    return KEY_BINDINGS[event.code] ?? KEY_BINDINGS[event.key.toLowerCase()];
+  }
 }
