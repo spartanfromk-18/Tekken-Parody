@@ -9,21 +9,24 @@ export class CameraController {
   }
 
   update(first: THREE.Vector3, second: THREE.Vector3, deltaTime = 1 / 60): void {
-    const midpoint = this.focus.copy(first).add(second).multiplyScalar(0.5);
-    const distance = Math.min(Math.abs(first.x - second.x), 14);
+    const midpointX = THREE.MathUtils.clamp((first.x + second.x) * 0.5, -2.5, 2.5);
+    const distance = Math.abs(first.x - second.x);
+    const targetZ = Math.max(7.5, Math.min(11.5, 6.5 + distance * 0.6));
 
     this.camera.position.x = THREE.MathUtils.damp(
       this.camera.position.x,
-      midpoint.x,
+      midpointX,
       6,
       deltaTime,
     );
+    this.camera.position.y = 3.2;
     this.camera.position.z = THREE.MathUtils.lerp(
       this.camera.position.z,
-      7.2 + distance * 0.45,
+      targetZ,
       1 - Math.exp(-4 * deltaTime),
     );
-    this.camera.lookAt(midpoint);
+    this.focus.set(midpointX, 1.2, 0);
+    this.camera.lookAt(this.focus);
   }
 
   resize(width: number, height: number): void {
