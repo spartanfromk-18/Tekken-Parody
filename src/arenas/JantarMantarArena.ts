@@ -2,24 +2,43 @@ import * as THREE from 'three';
 
 export function buildJantarMantarArena(scene: THREE.Scene): void {
   const arena = new THREE.Group();
-  arena.name = 'JantarMantarArena';
+  arena.name = 'TekkenArenaCinematic';
   scene.add(arena);
-  scene.background = new THREE.Color(0x11081f);
-  scene.fog = new THREE.FogExp2(0x180c2e, 0.03);
 
+  // Dark moody atmospheric background
+  scene.background = new THREE.Color(0x05050b);
+  scene.fog = new THREE.FogExp2(0x05050b, 0.025);
+
+  // High-gloss reflective combat floor
   const floor = new THREE.Mesh(
-    new THREE.CylinderGeometry(9.5, 10.5, 0.4, 64),
-    new THREE.MeshStandardMaterial({ color: 0x2a1b3d, roughness: 0.6 }),
+    new THREE.CylinderGeometry(12, 13, 0.5, 64),
+    new THREE.MeshStandardMaterial({ 
+      color: 0x0f111a, 
+      roughness: 0.2, 
+      metalness: 0.8 
+    })
   );
-  floor.position.y = -0.2;
+  floor.position.y = -0.25;
   floor.receiveShadow = true;
   arena.add(floor);
 
-  const grid = new THREE.GridHelper(30, 30, 0xff77ff, 0x442266);
+  // Neon grid ring for arcade depth
+  const grid = new THREE.GridHelper(32, 32, 0xff0055, 0x1a1a3a);
   grid.position.y = 0.01;
   arena.add(grid);
-  scene.add(new THREE.HemisphereLight(0xffbbee, 0x11081f, 1.2));
-  const light = new THREE.DirectionalLight(0xffd6ff, 2.2);
-  light.position.set(5, 8, 5);
-  scene.add(light);
+
+  // Cinematic Lighting Rig
+  const ambient = new THREE.AmbientLight(0x222244, 1.5);
+  scene.add(ambient);
+
+  // Key light (Blue cyan rim)
+  const keyLight = new THREE.DirectionalLight(0x00ffff, 3.5);
+  keyLight.position.set(8, 10, 6);
+  keyLight.castShadow = true;
+  scene.add(keyLight);
+
+  // Fill light (Hot magenta rim)
+  const fillLight = new THREE.DirectionalLight(0xff0055, 3.0);
+  fillLight.position.set(-8, 8, -6);
+  scene.add(fillLight);
 }
